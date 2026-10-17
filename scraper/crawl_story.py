@@ -5,6 +5,7 @@ Vi du:
     python scraper\\crawl_story.py search "linh vu"
     python scraper\\crawl_story.py story 59b410cf6fc3330b5d062f53 --max-chapters 5
     python scraper\\crawl_story.py story 59b410cf6fc3330b5d062f53          # full
+    python scraper\\crawl_story.py story <id> --from 100 --to 250        # chi chuong 100-250
     python scraper\\crawl_story.py story <id> --delay 1.5 --retries 6
 
 Chay lai voi cung story_id se TU DONG RESUME: bo qua cac chuong da co trong
@@ -53,7 +54,10 @@ def cmd_search(client: TytClient, args) -> int:
 def console_events(event: dict) -> None:
     t = event.get("type")
     if t == "story":
-        print(f"[{event['story_id']}] {event.get('title')!r} - {event.get('total')} chuong")
+        print(
+            f"[{event['story_id']}] {event.get('title')!r} - {event.get('total')} chuong "
+            f"(tai {event.get('start')}-{event.get('end')})"
+        )
     elif t == "resume":
         print(f"  resume: da co {event['count']} chuong, bo qua cac chuong nay")
     elif t == "retry":
@@ -73,7 +77,10 @@ def cmd_story(client: TytClient, args) -> int:
         client, args.story_id, OUT_ROOT,
         delay=args.delay, retries=args.retries, on_event=console_events,
     )
-    crawler.run(max_chapters=args.max_chapters, resume=args.resume)
+    crawler.run(
+        max_chapters=args.max_chapters, resume=args.resume,
+        start_chapter=args.start, end_chapter=args.end,
+    )
     return 0
 
 
@@ -94,6 +101,8 @@ def main() -> int:
     p_story = sub.add_parser("story", help="crawl 1 truyen")
     p_story.add_argument("story_id")
     p_story.add_argument("--max-chapters", type=int, default=0, help="0 = tat ca")
+    p_story.add_argument("--from", dest="start", type=int, default=0, help="chuong dau (mac dinh 1)")
+    p_story.add_argument("--to", dest="end", type=int, default=0, help="chuong cuoi (mac dinh: het)")
     p_story.add_argument("--delay", type=float, default=1.0, help="giay giua cac request (tranh 429)")
     p_story.add_argument("--retries", type=int, default=6, help="so lan thu lai khi bi rate limit")
     p_story.add_argument("--no-resume", dest="resume", action="store_false", help="crawl lai tu dau")
