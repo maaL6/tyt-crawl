@@ -1,0 +1,55 @@
+# Dữ liệu crawl & xuất file
+out/
+captured.jsonl
+blocked.txt
+
+# Session thiết bị & thông tin nhạy cảm (device_id, device_secret)
+**/.tyt_session.json
+.tyt_session.json
+*.session.json
+
+# APK & công cụ dịch ngược (JADX, binary, jar)
+apk/
+tools/jadx/
+*.apk
+*.dex
+*.jar
+
+# Log & file tạm
+*.log
+hs_err_pid*
+Host
+
+# Build PyInstaller & file nén đóng gói
+dist/
+dist-2/
+build/
+build2/
+*.spec
+*.zip
+
+# Python & môi trường ảo
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Hệ điều hành (Windows / macOS)
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store

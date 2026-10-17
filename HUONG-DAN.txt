@@ -1,0 +1,63 @@
+﻿============================================================
+  TYT CRAWL — Công cụ tải truyện từ app TYT
+============================================================
+
+CÁCH CHẠY
+---------
+1. Bấm đúp vào file:  TYT-Crawl.exe
+2. Trình duyệt tự mở:  http://127.0.0.1:8787
+   (Nếu không tự mở, tự gõ địa chỉ đó vào trình duyệt)
+3. Để TẮT: đóng cửa sổ đen (console) là xong.
+
+
+CẢNH BÁO "Windows protected your PC"
+------------------------------------
+File .exe này không được ký số (unsigned) nên Windows SmartScreen có thể cảnh báo:
+    -> Bấm "More info"  ->  "Run anyway"
+Hoặc: chuột phải file .exe -> Properties -> tích "Unblock" -> OK.
+
+
+DỮ LIỆU LƯU Ở ĐÂU?
+------------------
+Mọi thứ nằm trong thư mục "out" NGAY CẠNH file .exe:
+
+    out\<mã_truyện>\story.json       <- thông tin truyện (tên, tác giả, bìa, mô tả...)
+    out\<mã_truyện>\chapters.jsonl   <- nội dung các chương (mỗi dòng 1 chương)
+
+File .tyt_session.json (cạnh .exe) chỉ lưu mã thiết bị để gọi API.
+Có thể xoá — lần sau chạy sẽ tự đăng ký lại.
+
+
+CÁCH DÙNG GIAO DIỆN
+-------------------
+- Tab "Khám phá"  : danh sách truyện mới. Bấm "Tải thêm ↓" để xem tiếp.
+- Tab "Tìm kiếm"  : gõ tên truyện -> Enter.
+- Tab "Đã tải"    : các truyện đã tải về máy.
+
+Bấm vào 1 truyện -> hiện chi tiết ở khung bên phải:
+    + "Số chương": để 0 = tải TẤT CẢ (có thể rất lâu với truyện nghìn chương)
+    + "Delay"    : nghỉ giữa các request. Mạng chậm / bị lỗi 429 thì tăng lên 1.5–2s
+    + "Bỏ qua chương đã có": chạy tiếp, không tải lại (nên giữ tích)
+    + Bấm "⬇ Bắt đầu crawl" -> theo dõi thanh tiến độ + log trực tiếp
+    + Bấm "⏹ Dừng" để dừng bất cứ lúc nào (đã tải đến đâu lưu đến đó)
+
+- Danh sách "Chương đã tải": bấm vào 1 chương để ĐỌC NGAY trên web (có Trước/Sau).
+- Nút ".txt" / ".jsonl": tải toàn bộ truyện về máy.
+
+
+CHẠY TỪ DÒNG LỆNH (tuỳ chọn)
+----------------------------
+    TYT-Crawl.exe --port 9000      đổi cổng (mặc định 8787)
+    TYT-Crawl.exe --no-browser     không tự mở trình duyệt
+    TYT-Crawl.exe --help           xem trợ giúp
+
+
+LƯU Ý
+-----
+- Cần kết nối Internet. Chỉ tải dữ liệu CÔNG KHAI (không cần đăng nhập).
+- Lỗi "HTTP 429": đang bị giới hạn tốc độ -> tăng "Delay" lên 1.5–2 giây.
+- Truyện nghìn chương: nên để chạy nền, có thể dừng rồi chạy tiếp (resume).
+- Chương đã tải nằm trong "out" — muốn chuyển máy chỉ cần chép cả thư mục này.
+- Chỉ dùng cho mục đích cá nhân / dữ liệu bạn được phép tải.
+
+============================================================

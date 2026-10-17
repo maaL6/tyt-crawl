@@ -1,0 +1,4 @@
+httpx[http2]>=0.27
+
+# tuy chon: chi can cho scraper/probe_site*.py (gia lap TLS trinh duyet)
+curl_cffi>=0.7
