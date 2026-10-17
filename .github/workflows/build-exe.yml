@@ -47,6 +47,37 @@ jobs:
         shell: cmd
         run: call build-exe.cmd
 
+      - name: "[DIAG] Thử gọi API trên Windows"
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ua = 'Dalvik/2.1.0 (Linux; U; Android 14; 2312DRA50I Build/UKQ1.231003.002)'
+          $api = 'https://api.noveltyt.app/api/v2/'
+          Write-Host '== 1. curl.exe'
+          (curl.exe --version)[0]
+          curl.exe -s -o NUL -w "curl.exe app/info http=%{http_code}`n" -A $ua -H "client-id: tytno" -H "client-token: tytno" -H "client-platform: android" -H "client-version: 147" -H "client-language: vi" -H "client-uuid: x" "${api}app/info"
+          Write-Host '== 2. python httpx'
+          python -c "import httpx,ssl;print(ssl.OPENSSL_VERSION);r=httpx.get('${api}app/info',headers={'User-Agent':'$ua','client-id':'tytno','client-token':'tytno','client-platform':'android','client-version':'147','client-language':'vi','client-uuid':'x'},timeout=20);print('httpx http=',r.status_code,r.headers.get('cf-mitigated'))"
+          Write-Host '== 3. TYT-Crawl.exe (ban vua build)'
+          $p = Start-Process dist\TYT-Crawl.exe -ArgumentList '--no-browser','--port','8799' -PassThru -RedirectStandardOutput exe.out.txt -RedirectStandardError exe.err.txt
+          Start-Sleep 12
+          try {
+            $list = Invoke-RestMethod 'http://127.0.0.1:8799/api/list?count=2'
+            Write-Host ("list ok: " + ($list.data | ForEach-Object { $_.title }) -join ' | ')
+            $id = $list.data[0].id
+            $body = @{ story_id = $id; start_chapter = 1; end_chapter = 2; delay = 0.8 } | ConvertTo-Json
+            $job = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8799/api/crawl' -ContentType 'application/json' -Body $body
+            Start-Sleep 15
+            $st = Invoke-RestMethod ("http://127.0.0.1:8799/api/job?id=" + $job.data.job_id)
+            Write-Host ("job status=" + $st.data.status + " have=" + $st.data.have + "/" + $st.data.total + " errors=" + ($st.data.errors -join ';'))
+            $st.data.log | ForEach-Object { Write-Host "  log: $_" }
+          } catch {
+            Write-Host ("EXE LOI: " + $_.Exception.Message + " | " + $_.ErrorDetails.Message)
+          }
+          Stop-Process $p -Force -ErrorAction SilentlyContinue
+          Write-Host '--- console cua exe:'
+          Get-Content exe.out.txt, exe.err.txt -ErrorAction SilentlyContinue
+
       - name: Kiểm tra file build ra
         shell: pwsh
         run: |
