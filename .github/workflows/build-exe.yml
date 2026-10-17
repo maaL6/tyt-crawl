@@ -3,7 +3,25 @@ name: Build TYT-Crawl.exe
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths:
+      - "scraper/**"
+      - "requirements.txt"
+      - "build-exe.cmd"
+      - "HUONG-DAN.txt"
+      - ".github/workflows/build-exe.yml"
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "scraper/**"
+      - "requirements.txt"
+      - "build-exe.cmd"
+      - "HUONG-DAN.txt"
+      - ".github/workflows/build-exe.yml"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -21,6 +39,9 @@ jobs:
 
       - name: Cài thư viện
         run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Kiểm tra cú pháp Python
+        run: python -m compileall -q scraper
 
       - name: Build (dùng build-exe.cmd)
         shell: cmd
