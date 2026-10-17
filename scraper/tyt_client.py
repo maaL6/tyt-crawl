@@ -78,8 +78,9 @@ if not SESSION_FILE:
 
 
 class TytError(RuntimeError):
-    def __init__(self, code: int, error_code: str = "", payload=None, retry_after: float | None = None):
-        super().__init__(f"HTTP {code} error_code={error_code!r}")
+    def __init__(self, code: int, error_code: str = "", payload=None, retry_after: float | None = None,
+                 detail: str = ""):
+        super().__init__(f"HTTP {code} error_code={error_code!r}" + (f" ({detail})" if detail else ""))
         self.code = code
         self.error_code = error_code
         self.payload = payload
@@ -103,9 +104,24 @@ class _CurlResponse:
         return json.loads(self.text)
 
 
-def _is_cf_challenge(resp) -> bool:
-    return resp.status_code == 403 and (
-        resp.headers.get("cf-mitigated") == "challenge" or "Just a moment" in resp.text[:2000]
+def _is_api_json(resp) -> bool:
+    try:
+        return isinstance(resp.json(), dict)
+    except ValueError:
+        return False
+
+
+def _is_edge_block(resp) -> bool:
+    """403 do Cloudflare/CDN (khong phai JSON cua API) -> thu lai bang curl."""
+    return resp.status_code == 403 and (resp.headers.get("cf-mitigated") == "challenge" or not _is_api_json(resp))
+
+
+def _describe(resp) -> str:
+    h = resp.headers
+    return (
+        f"server={h.get('server')}, cf-mitigated={h.get('cf-mitigated')}, "
+        f"transport={'curl' if isinstance(resp, _CurlResponse) else 'python'}, "
+        f"curl={CURL or 'KHONG TIM THAY'}"
     )
 
 
@@ -250,7 +266,7 @@ class TytClient:
         try:
             payload = resp.json()
         except ValueError:
-            raise TytError(resp.status_code, "invalid_json", resp.text[:500], retry_after) from None
+            raise TytError(resp.status_code, "invalid_json", resp.text[:500], retry_after, _describe(resp)) from None
         if isinstance(payload, dict) and payload.get("status") is False:
             raise TytError(resp.status_code, str(payload.get("error_code", "")), payload, retry_after)
         if resp.status_code >= 400:
@@ -263,9 +279,9 @@ class TytClient:
                 resp = self.http.request(method, target, headers=headers)
             else:
                 resp = self.http.request(method, target, headers=headers, content=content)
-            if not (CURL and _is_cf_challenge(resp)):
+            if not (CURL and _is_edge_block(resp)):
                 return resp
-            print("  ! Cloudflare chan ket noi Python (403) -> chuyen sang curl", flush=True)
+            print("  ! Bi chan o tang mang (403) -> chuyen sang curl", flush=True)
         self._use_curl = True
         return self._curl(method, target, headers, content)
 
@@ -326,6 +342,69 @@ class TytClient:
 
     def close(self):
         self.http.close()
+
+
+def diagnose(write_to: str | None = None) -> None:
+    """In (va luu) thong tin de tim nguyen nhan 403. Dung: TYT-Crawl.exe --diagnose"""
+    import platform
+    import ssl
+
+    lines: list[str] = []
+
+    def out(msg: str = "") -> None:
+        print(msg, flush=True)
+        lines.append(msg)
+
+    out(f"He dieu hanh : {platform.platform()}")
+    out(f"Python       : {platform.python_version()} ({ssl.OPENSSL_VERSION}), dong goi={getattr(sys, 'frozen', False)}")
+    out(f"curl         : {CURL or 'KHONG TIM THAY trong PATH'}")
+    if CURL:
+        try:
+            ver = subprocess.run([CURL, "--version"], capture_output=True, timeout=15,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            out("curl version : " + ver.stdout.decode("utf-8", "replace").splitlines()[0])
+        except (OSError, subprocess.SubprocessError, IndexError) as exc:
+            out(f"curl version : LOI {exc}")
+    for var in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy"):
+        if os.environ.get(var):
+            out(f"proxy        : {var}={os.environ[var]}")
+
+    client = TytClient()
+    url = client.base_url + "app/info"
+
+    def probe(label: str, fn) -> None:
+        try:
+            r = fn()
+            body = r.text[:150].replace("\n", " ")
+            out(f"[{label}] HTTP {r.status_code}  server={r.headers.get('server')}  "
+                f"cf-mitigated={r.headers.get('cf-mitigated')}  body={body!r}")
+        except Exception as exc:  # noqa: BLE001
+            out(f"[{label}] LOI {type(exc).__name__}: {exc}")
+
+    out("\n-- Goi app/info --")
+    probe("python/httpx", lambda: client.http.get(url))
+    if CURL:
+        probe("curl", lambda: client._curl("GET", url, {}, None))
+
+    out("\n-- Chay that qua TytClient (tu dong chuyen sang curl neu can) --")
+    for label, call in (
+        ("dang ky thiet bi", client.ensure_device),
+        ("danh sach truyen", lambda: client.stories_list(limit=1)),
+    ):
+        try:
+            call()
+            out(f"[{label}] OK  (transport hien tai: {'curl' if client._use_curl else 'python'})")
+        except Exception as exc:  # noqa: BLE001
+            out(f"[{label}] LOI {exc}")
+    client.close()
+
+    if write_to:
+        try:
+            with open(write_to, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            print(f"\nDa luu ket qua vao: {write_to}  (gui file nay cho nguoi ho tro)")
+        except OSError as exc:
+            print(f"\nKhong luu duoc file: {exc}")
 
 
 def _show(label: str, data) -> None:
