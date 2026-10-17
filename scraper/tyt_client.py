@@ -35,6 +35,8 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -50,6 +52,11 @@ USER_AGENT = os.environ.get(
     "Dalvik/2.1.0 (Linux; U; Android 14; 2312DRA50I Build/UKQ1.231003.002)",
 )
 SESSION_FILE = os.environ.get("TYT_SESSION_FILE") or ""
+
+# Cloudflare doi luc chan "dau van tay TLS" cua Python (403 "Just a moment...") du header dung.
+# Khi do tu chuyen sang curl (co san tren Windows 10+ va macOS). TYT_TRANSPORT=curl de ep dung curl.
+CURL = shutil.which("curl")
+FORCE_CURL = os.environ.get("TYT_TRANSPORT", "").lower() == "curl"
 
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -84,6 +91,24 @@ class TytError(RuntimeError):
         return self.code == 429 or self.code >= 500 or self.code == 0
 
 
+class _CurlResponse:
+    """Vo mong giong httpx.Response (chi phan _request can)."""
+
+    def __init__(self, status: int, headers: dict, content: bytes):
+        self.status_code = status
+        self.headers = headers  # khoa viet thuong
+        self.text = content.decode("utf-8", "replace")
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def _is_cf_challenge(resp) -> bool:
+    return resp.status_code == 403 and (
+        resp.headers.get("cf-mitigated") == "challenge" or "Just a moment" in resp.text[:2000]
+    )
+
+
 def _encode(value: str) -> str:
     """Giong dj.q.e(): URLEncoder.encode + vai thay the."""
     return (
@@ -116,6 +141,7 @@ class TytClient:
         self.device_id: str | None = None
         self.device_secret: bytes | None = None
         self._device_lock = threading.Lock()
+        self._use_curl = False
         self.http = httpx.Client(
             headers={
                 "client-id": "tytno",
@@ -208,12 +234,11 @@ class TytClient:
         retry_after = None
         try:
             if method in ("GET", "DELETE"):
-                target = url + (("?" + query) if query else "")
-                resp = self.http.request(method, target, headers=headers)
+                resp = self._send(method, url + (("?" + query) if query else ""), headers, None)
             else:
-                resp = self.http.request(method, url, headers=headers, content=body_bytes)
+                resp = self._send(method, url, headers, body_bytes)
             ra = resp.headers.get("retry-after")
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, OSError, subprocess.SubprocessError) as exc:
             raise TytError(0, type(exc).__name__, str(exc)) from None
 
         if ra:
@@ -231,6 +256,47 @@ class TytClient:
         if resp.status_code >= 400:
             raise TytError(resp.status_code, "", payload, retry_after)
         return payload
+
+    def _send(self, method: str, target: str, headers: dict, content: bytes | None):
+        if not (self._use_curl or FORCE_CURL and CURL):
+            if content is None:
+                resp = self.http.request(method, target, headers=headers)
+            else:
+                resp = self.http.request(method, target, headers=headers, content=content)
+            if not (CURL and _is_cf_challenge(resp)):
+                return resp
+            print("  ! Cloudflare chan ket noi Python (403) -> chuyen sang curl", flush=True)
+        self._use_curl = True
+        return self._curl(method, target, headers, content)
+
+    def _curl(self, method: str, target: str, headers: dict, content: bytes | None):
+        merged = {**self.http.headers, **headers}
+        cmd = [CURL, "-sS", "-i", "--http1.1", "--compressed", "--max-time", "30", "-X", method]
+        if sys.platform == "win32":
+            cmd.append("--ssl-no-revoke")  # schannel hay loi kiem tra thu hoi cert sau proxy/mang cong ty
+        for k, v in merged.items():
+            if k.lower() not in ("host", "accept-encoding", "connection", "content-length"):
+                cmd += ["-H", f"{k}: {v}"]
+        if content is not None:
+            cmd += ["--data-binary", "@-", "-H", "Content-Type:"]
+        cmd.append(target)
+        proc = subprocess.run(
+            cmd, input=content, capture_output=True, timeout=45,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if proc.returncode != 0:
+            raise OSError(f"curl loi {proc.returncode}: {proc.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        data = proc.stdout
+        while True:  # bo qua khoi "HTTP/1.1 100 Continue"
+            head, _, rest = data.partition(b"\r\n\r\n")
+            lines = head.decode("latin-1").split("\r\n")
+            status = int(lines[0].split()[1])
+            if status < 200:
+                data = rest
+                continue
+            break
+        hdrs = {l.split(":", 1)[0].strip().lower(): l.split(":", 1)[1].strip() for l in lines[1:] if ":" in l}
+        return _CurlResponse(status, hdrs, rest)
 
     # --- endpoints -------------------------------------------------------
     def app_info(self):
