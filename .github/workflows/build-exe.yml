@@ -1,0 +1,52 @@
+name: Build TYT-Crawl.exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Cài thư viện
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build (dùng build-exe.cmd)
+        shell: cmd
+        run: call build-exe.cmd
+
+      - name: Kiểm tra file build ra
+        shell: pwsh
+        run: |
+          foreach ($f in 'dist\TYT-Crawl.exe', 'dist\TYT-Crawl-portable.zip', 'dist\TYT-Crawl-folder.zip') {
+            if (-not (Test-Path $f)) { throw "Thiếu $f" }
+          }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TYT-Crawl-windows
+          path: |
+            dist/TYT-Crawl-portable.zip
+            dist/TYT-Crawl-folder.zip
+          if-no-files-found: error
+
+      - name: Đính kèm vào GitHub Release (khi push tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes \
+            dist/TYT-Crawl-portable.zip dist/TYT-Crawl-folder.zip

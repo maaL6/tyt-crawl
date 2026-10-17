@@ -80,7 +80,18 @@ class Crawler:
                     raise TytError(0, "stopped") from None
 
     # -- main -------------------------------------------------------------
-    def run(self, max_chapters: int = 0, resume: bool = True) -> dict:
+    def run(
+        self,
+        max_chapters: int = 0,
+        resume: bool = True,
+        start_chapter: int = 0,
+        end_chapter: int = 0,
+    ) -> dict:
+        """Crawl chuong [start_chapter .. end_chapter] (bao gom 2 dau).
+
+        start_chapter = 0 -> tu chuong 1; end_chapter = 0 -> den het (hoac dung
+        max_chapters chuong tinh tu start_chapter neu max_chapters > 0).
+        """
         story_id = self.story_id
         out_dir = os.path.join(self.out_root, story_id)
         os.makedirs(out_dir, exist_ok=True)
@@ -99,10 +110,30 @@ class Crawler:
             json.dump(detail, f, ensure_ascii=False, indent=2)
 
         total_meta = int(detail.get("chapter_count") or 0)
+        first = max(1, int(start_chapter or 1))
+        if end_chapter:
+            last = int(end_chapter)
+        elif max_chapters:
+            last = first + int(max_chapters) - 1
+        else:
+            last = total_meta
+        if total_meta:  # chapters/numbers tra 400 neu end > chapter_count
+            last = min(last, total_meta)
+        range_total = max(0, last - first + 1)
         self._emit(
             type="story", story_id=story_id, title=detail.get("title"),
             author=detail.get("author"), total=total_meta,
+            start=first, end=last, range_total=range_total,
         )
+        if range_total == 0:
+            message = f"Khoảng chương {first}–{last} không hợp lệ (truyện có {total_meta} chương)"
+            self._emit(type="error", message=message)
+            summary = {
+                "story_id": story_id, "title": detail.get("title"), "total_meta": total_meta,
+                "written": 0, "have": 0, "stopped": False, "errors": [message], "path": None,
+            }
+            self._emit(type="done", **summary)
+            return summary
 
         chapters_path = os.path.join(out_dir, "chapters.jsonl")
         done: set[int] = set()
@@ -113,21 +144,25 @@ class Crawler:
                         done.add(int(json.loads(line)["number"]))
                     except (ValueError, KeyError, TypeError):
                         continue
-            if done:
-                self._emit(type="resume", count=len(done))
 
-        limit = max_chapters or total_meta
+        def in_range(n) -> bool:
+            return isinstance(n, int) and first <= n <= last
+
+        have_range = sum(1 for n in done if in_range(n))
+        if have_range:
+            self._emit(type="resume", count=have_range)
+
         written = 0
         errors: list[str] = []
         stopped = False
 
         with open(chapters_path, "a", encoding="utf-8") as f:
-            start = 1
-            while start <= limit:
+            start = first
+            while start <= last:
                 if self.stop_event.is_set():
                     stopped = True
                     break
-                end = min(start + self.BATCH - 1, limit)
+                end = min(start + self.BATCH - 1, last)
                 try:
                     nums = self._fetch(
                         lambda: self.client.chapter_numbers(story_id, start, end),
@@ -172,8 +207,10 @@ class Crawler:
                     f.flush()
                     done.add(number)
                     written += 1
+                    if in_range(number):
+                        have_range += 1
                     self._emit(
-                        type="progress", done=written, have=len(done),
+                        type="progress", done=written, have=have_range,
                         number=number, title=record["title"],
                         chars=len(record["content"] or ""),
                     )
@@ -185,7 +222,8 @@ class Crawler:
             "title": detail.get("title"),
             "total_meta": total_meta,
             "written": written,
-            "have": len(done),
+            "have": have_range,
+            "range": [first, last],
             "stopped": stopped,
             "errors": errors[:20],
             "path": chapters_path,

@@ -117,11 +117,16 @@ def _on_event(job: dict, event: dict) -> None:
         if etype == "story":
             job["title"] = event.get("title") or job["title"]
             job["author"] = event.get("author") or ""
-            job["total"] = job["max_chapters"] or int(event.get("total") or 0)
-            job["log"].append(f"Truyện: {job['title']} — {event.get('total')} chương")
+            job["total"] = int(event.get("range_total") or 0)
+            job["start_chapter"] = int(event.get("start") or 1)
+            job["end_chapter"] = int(event.get("end") or 0)
+            job["log"].append(
+                f"Truyện: {job['title']} — {event.get('total')} chương, "
+                f"tải chương {job['start_chapter']}–{job['end_chapter']}"
+            )
         elif etype == "resume":
             job["have"] = int(event["count"] or 0)
-            job["log"].append(f"Đã có {event['count']} chương, bỏ qua.")
+            job["log"].append(f"Đã có {event['count']} chương trong khoảng này, bỏ qua.")
         elif etype == "retry":
             job["log"].append(
                 f"⏳ {event['label']}: {event['message']} — chờ {event['wait']}s "
@@ -153,6 +158,8 @@ def _run_job(job_id: str) -> None:
         retries = job["retries"]
         max_ch = job["max_chapters"]
         resume = job["resume"]
+        first = job["start_chapter"]
+        last = job["end_chapter"]
 
     crawler = Crawler(
         _client, jid, OUT_ROOT, delay=delay, retries=retries,
@@ -162,7 +169,7 @@ def _run_job(job_id: str) -> None:
         job["crawler"] = crawler
 
     try:
-        crawler.run(max_chapters=max_ch, resume=resume)
+        crawler.run(max_chapters=max_ch, resume=resume, start_chapter=first, end_chapter=last)
     except TytError as exc:
         with _jobs_lock:
             job["status"] = "error"
@@ -354,6 +361,11 @@ class Handler(BaseHTTPRequestHandler):
             if not story_id:
                 self._err("Thieu story_id")
                 return
+            first = _int(body.get("start_chapter"), 0, 0)
+            last = _int(body.get("end_chapter"), 0, 0)
+            if last and last < max(first, 1):
+                self._err("Khoảng chương không hợp lệ: chương cuối nhỏ hơn chương đầu")
+                return
             with _jobs_lock:
                 if _active_job:
                     active = _jobs.get(_active_job, {})
@@ -379,6 +391,8 @@ class Handler(BaseHTTPRequestHandler):
                     "errors": [],
                     "log": ["Bắt đầu..."],
                     "max_chapters": max(0, int(body.get("max_chapters") or 0)),
+                    "start_chapter": first,
+                    "end_chapter": last,
                     "delay": min(30.0, max(0.0, float(body.get("delay") or 1.0))),
                     "retries": min(20, max(0, int(body.get("retries") or 6))),
                     "resume": bool(body.get("resume", True)),
