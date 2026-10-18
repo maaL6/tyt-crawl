@@ -55,6 +55,9 @@ CHẠY TỪ DÒNG LỆNH (tuỳ chọn)
 LƯU Ý
 -----
 - Cần kết nối Internet. Chỉ tải dữ liệu CÔNG KHAI (không cần đăng nhập).
+- Lỗi "HTTP 403" / không tải được danh sách: mở CMD hoặc PowerShell trong thư mục chứa .exe rồi chạy
+      TYT-Crawl.exe --diagnose
+  Lệnh này kiểm tra kết nối và lưu kết quả vào file tyt-diagnose.txt (cạnh .exe) — gửi file đó để được hỗ trợ.
 - Lỗi "HTTP 429": đang bị giới hạn tốc độ -> tăng "Delay" lên 1.5–2 giây.
 - Truyện nghìn chương: nên để chạy nền, có thể dừng rồi chạy tiếp (resume).
 - Chương đã tải nằm trong "out" — muốn chuyển máy chỉ cần chép cả thư mục này.

@@ -53,3 +53,6 @@ ehthumbs.db
 [Dd]esktop.ini
 $RECYCLE.BIN/
 .DS_Store
+
+# Kết quả chẩn đoán kết nối
+tyt-diagnose.txt

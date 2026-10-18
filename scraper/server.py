@@ -35,7 +35,7 @@ from crawler import (  # noqa: E402
     read_chapter,
     strip_html,
 )
-from tyt_client import TytClient, TytError, app_dir, resource_dir  # noqa: E402
+from tyt_client import CURL, TytClient, TytError, app_dir, diagnose, resource_dir  # noqa: E402
 
 ROOT = app_dir()
 OUT_ROOT = os.environ.get("TYT_OUT") or os.path.join(ROOT, "out")
@@ -478,7 +478,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=PORT, help=f"cong web UI (mac dinh {PORT})")
     parser.add_argument("--host", default=HOST, help=f"dia chi lang nghe (mac dinh {HOST})")
     parser.add_argument("--no-browser", action="store_true", help="khong tu mo trinh duyet")
+    parser.add_argument("--diagnose", action="store_true", help="kiem tra ket noi API (khi bi loi 403) roi thoat")
     args = parser.parse_args(argv)
+
+    if args.diagnose:
+        diagnose(os.path.join(ROOT, "tyt-diagnose.txt"))
+        return 0
 
     if not os.path.exists(UI_FILE):
         print("Thieu file giao dien:", UI_FILE)
@@ -492,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  TYT Crawl")
     print(f"  Giao dien : {url}")
     print(f"  Du lieu   : {OUT_ROOT}")
+    print(f"  curl      : {CURL or 'KHONG TIM THAY (neu bi 403 hay chay: --diagnose)'}")
     print("  Dong cua so nay de tat.")
     print("=" * 60)
 
