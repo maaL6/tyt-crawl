@@ -41,6 +41,7 @@ import sys
 import threading
 import time
 import uuid
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 import httpx
@@ -158,6 +159,7 @@ class TytClient:
         self.device_secret: bytes | None = None
         self._device_lock = threading.Lock()
         self._use_curl = False
+        self._drift = 0.0  # giay: gio server - gio may, hieu chinh x-ts giong app that
         self.http = httpx.Client(
             headers={
                 "client-id": "tytno",
@@ -218,6 +220,25 @@ class TytClient:
             self.device_secret = secret
             self._save_session()
 
+    def _reset_device(self) -> None:
+        """Bo thiet bi cu (server tu choi: 401) de lan sau dang ky lai."""
+        with self._device_lock:
+            self.device_id = None
+            self.device_secret = None
+            try:
+                os.remove(SESSION_FILE)
+            except OSError:
+                pass
+
+    def _sync_clock(self, resp) -> None:
+        date = resp.headers.get("date")
+        if not date:
+            return
+        try:
+            self._drift = parsedate_to_datetime(date).timestamp() - time.time()
+        except (TypeError, ValueError):
+            pass
+
     # --- transport -------------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes, ts: int, nonce: str) -> str:
         body_hash = hashlib.sha256(body).hexdigest() if body else EMPTY_SHA256
@@ -226,6 +247,18 @@ class TytClient:
         return base64.b64encode(mac.digest()).decode()
 
     def _request(self, method: str, path: str, params=None, body=None, signed=False):
+        used_device = self.device_id
+        try:
+            return self._request_once(method, path, params, body, signed)
+        except TytError as exc:
+            # 401 = server khong nhan thiet bi / chu ky -> dang ky thiet bi moi va thu lai 1 lan
+            if signed and exc.code == 401:
+                if self.device_id == used_device:  # luong khac chua kip dang ky lai
+                    self._reset_device()
+                return self._request_once(method, path, params, body, signed)
+            raise
+
+    def _request_once(self, method: str, path: str, params=None, body=None, signed=False):
         url = self.base_url + path.lstrip("/")
         path_only = httpx.URL(url).path
         query = build_query(params) if params else ""
@@ -234,7 +267,7 @@ class TytClient:
         headers = {}
         if signed:
             self.ensure_device()
-            ts = int(time.time())
+            ts = int(time.time() + self._drift)
             nonce = str(uuid.uuid4())
             if method in ("GET", "DELETE"):
                 body_bytes = b""
@@ -254,6 +287,7 @@ class TytClient:
             else:
                 resp = self._send(method, url, headers, body_bytes)
             ra = resp.headers.get("retry-after")
+            self._sync_clock(resp)
         except (httpx.HTTPError, OSError, subprocess.SubprocessError) as exc:
             raise TytError(0, type(exc).__name__, str(exc)) from None
 
@@ -281,7 +315,8 @@ class TytClient:
                 resp = self.http.request(method, target, headers=headers, content=content)
             if not (CURL and _is_edge_block(resp)):
                 return resp
-            print("  ! Bi chan o tang mang (403) -> chuyen sang curl", flush=True)
+            print("  [i] Cloudflare chan Python (403) -> tu dong chuyen sang curl. Day la binh thuong, khong phai loi.",
+              flush=True)
         self._use_curl = True
         return self._curl(method, target, headers, content)
 
@@ -390,12 +425,15 @@ def diagnose(write_to: str | None = None) -> None:
     for label, call in (
         ("dang ky thiet bi", client.ensure_device),
         ("danh sach truyen", lambda: client.stories_list(limit=1)),
+        ("tai chuong 1 (co chu ky)", lambda: client.chapter_detail(
+            client.stories_list(limit=1)["data"][0]["id"], 1)),
     ):
         try:
             call()
             out(f"[{label}] OK  (transport hien tai: {'curl' if client._use_curl else 'python'})")
         except Exception as exc:  # noqa: BLE001
             out(f"[{label}] LOI {exc}")
+    out(f"lech gio so voi server: {client._drift:+.1f}s  (qua 300s se bi ts_drift)")
     client.close()
 
     if write_to:
